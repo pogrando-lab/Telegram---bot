@@ -3,43 +3,66 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Random;
 
 public class Main {
-    private static final String BOT_TOKEN = "8937303127:AAFRz6GgLeFLAYlJeJyIcwLPXAhz_NutLcM";
+    private static final String BOT_TOKEN = "8937303127:AAFRz6GgLeFLAY1JeJyIcwLPXAhz_NutLcM";
     private static final String TELEGRAM_API = "https://api.telegram.org/bot" + BOT_TOKEN;
 
     public static void main(String[] args) {
-        System.out.println("=== Бот успешно запущен и работает 24/7! ===");
+        System.out.println("=== Бот успешно запущен и работает с кнопками! ===");
         long lastUpdateId = 0;
 
         while (true) {
             try {
                 String urlString = TELEGRAM_API + "/getUpdates?offset=" + (lastUpdateId + 1) + "&timeout=30";
-                String response = sendApiRequest(urlString, "GET", null);
+                URL url = new URL(urlString);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
 
-                if (response != null && response.contains("\"ok\":true")) {
-                    int index = 0;
-                    while ((index = response.indexOf("\"update_id\":", index)) != -1) {
-                        index += "\"update_id\":".length();
-                        int commaIndex = response.indexOf(",", index);
+                try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+                    StringBuilder response = new StringBuilder();
+                    String responseLine;
+                    while ((responseLine = br.readLine()) != null) {
+                        response.append(responseLine.trim());
+                    }
+
+                    String json = response.toString();
+                    
+                    // Простая обработка обновлений
+                    if (json.contains("\"update_id\":")) {
+                        // Извлекаем update_id
+                        int updateIdIndex = json.lastIndexOf("\"update_id\":");
+                        int commaIndex = json.indexOf(",", updateIdIndex);
                         if (commaIndex != -1) {
-                            try {
-                                long updateId = Long.parseLong(response.substring(index, commaIndex).trim());
-                                if (updateId > lastUpdateId) {
-                                    lastUpdateId = updateId;
-                                }
-                            } catch (Exception ignored) {}
+                            String idStr = json.substring(updateIdIndex + 12, commaIndex).trim();
+                            lastUpdateId = Long.parseLong(idStr);
+                        }
+
+                        // Проверяем нажатие на инлайн-кнопку (callback_query)
+                        if (json.contains("\"callback_query\"")) {
+                            long chatId = extractLong(json, "\"chat\":{\"id\":");
+                            if (chatId == 0) {
+                                chatId = extractLong(json, "\"id\":");
+                            }
+                            String data = extractString(json, "\"data\":\"");
+                            
+                            if (data != null) {
+                                handleCommand(chatId, data);
+                            }
+                        } 
+                        // Проверяем обычное текстовое сообщение
+                        else if (json.contains("\"text\":")) {
+                            long chatId = extractLong(json, "\"chat\":{\"id\":");
+                            String text = extractString(json, "\"text\":\"");
+                            
+                            if (text != null) {
+                                handleCommand(chatId, text);
+                            }
                         }
                     }
-
-                    if (response.contains("\"text\":")) {
-                        processMessages(response);
-                    }
                 }
-                Thread.sleep(1000);
             } catch (Exception e) {
                 System.out.println("Ошибка в цикле опроса: " + e.getMessage());
                 try {
@@ -49,81 +72,91 @@ public class Main {
         }
     }
 
-    private static void processMessages(String json) {
-        int msgIndex = 0;
-        while ((msgIndex = json.indexOf("\"message\":", msgIndex)) != -1) {
-            int chatIndex = json.indexOf("\"chat\":{", msgIndex);
-            if (chatIndex == -1) break;
-
-            int idIndex = json.indexOf("\"id\":", chatIndex);
-            if (idIndex == -1) break;
-            int idEnd = json.indexOf(",", idIndex);
-            if (idEnd == -1) break;
-            String chatId = json.substring(idIndex + 5, idEnd).trim();
-
-            int textIndex = json.indexOf("\"text\":\"", msgIndex);
-            if (textIndex != -1) {
-                textIndex += 8;
-                int textEnd = json.indexOf("\"", textIndex);
-                if (textEnd != -1) {
-                    String text = json.substring(textIndex, textEnd);
-                    handleCommand(chatId, text);
-                }
-            }
-            msgIndex = chatIndex + 1;
+    private static void handleCommand(long chatId, String command) {
+        switch (command.trim()) {
+            case "/start":
+                sendResponse(chatId, "Привет! Я твой круглосуточный Java-бот на Render. Используй кнопки ниже для управления:");
+                break;
+            case "/help":
+                sendResponse(chatId, "Доступные команды:\n/start - Запустить бота\n/help - Помощь\n/roll - Бросить кубик (1-6)");
+                break;
+            case "/roll":
+                int roll = new Random().nextInt(6) + 1;
+                sendResponse(chatId, "🎲 Вам выпало: " + roll);
+                break;
+            default:
+                sendResponse(chatId, "Эхо: " + command);
+                break;
         }
     }
 
-    private static void handleCommand(String chatId, String text) {
-        System.out.println("Получено сообщение от " + chatId + ": " + text);
-        String replyText;
-
-        if (text.equals("/start")) {
-            replyText = "Привет! Я твой круглосуточный Java-бот на Render. Напиши /help для списка команд.";
-        } else if (text.equals("/help")) {
-            replyText = "Доступные команды:\n/start - Запустить бота\n/help - Помощь\n/roll - Бросить кубик (1-6)";
-        } else if (text.equals("/roll")) {
-            int roll = new Random().nextInt(6) + 1;
-            replyText = "🎲 Вам выпало: " + roll;
-        } else {
-            replyText = "Эхо: " + text;
-        }
-
-        sendMessage(chatId, replyText);
-    }
-
-    private static void sendMessage(String chatId, String text) {
+    private static void sendResponse(long chatId, String text) {
         try {
             String urlString = TELEGRAM_API + "/sendMessage";
-            String payload = "chat_id=" + chatId + "&text=" + URLEncoder.encode(text, StandardCharsets.UTF_8);
-            sendApiRequest(urlString, "POST", payload);
+            URL url = new URL(urlString);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json; utf-8");
+            conn.setDoOutput(true);
+
+            // Формируем JSON с текстом и красивыми кнопками (Inline Keyboard)
+            String jsonInputString = "{"
+                    + "\"chat_id\": " + chatId + ","
+                    + "\"text\": \"" + escapeJson(text) + "\","
+                    + "\"reply_markup\": {"
+                    + "  \"inline_keyboard\": ["
+                    + "    ["
+                    + "      {\"text\": \"🚀 Старт\", \"callback_data\": \"/start\"},"
+                    + "      {\"text\": \"ℹ️ Помощь\", \"callback_data\": \"/help\"}"
+                    + "    ],"
+                    + "    ["
+                    + "      {\"text\": \"🎲 Бросить кубик\", \"callback_data\": \"/roll\"}"
+                    + "    ]"
+                    + "  ]"
+                    + "}"
+                    + "}";
+
+            try (OutputStream os = conn.getOutputStream()) {
+                byte[] input = jsonInputString.getBytes(StandardCharsets.UTF_8);
+                os.write(input, 0, input.length);
+            }
+
+            conn.getResponseCode();
         } catch (Exception e) {
-            System.out.println("Ошибка отправки сообщения: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
-    private static String sendApiRequest(String urlString, String method, String payload) throws Exception {
-        URL url = new URL(urlString);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod(method);
-        conn.setConnectTimeout(10000);
-        conn.setReadTimeout(35000);
-
-        if (payload != null && method.equals("POST")) {
-            conn.setDoOutput(true);
-            conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-            try (OutputStream os = conn.getOutputStream()) {
-                os.write(payload.getBytes(StandardCharsets.UTF_8));
+    private static long extractLong(String json, String key) {
+        try {
+            int idx = json.indexOf(key);
+            if (idx == -1) return 0;
+            int start = idx + key.length();
+            int end = start;
+            while (end < json.length() && Character.isDigit(json.charAt(end))) {
+                end++;
             }
+            return Long.parseLong(json.substring(start, end));
+        } catch (Exception e) {
+            return 0;
         }
+    }
 
-        StringBuilder response = new StringBuilder();
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = br.readLine()) != null) {
-                response.append(line);
-            }
+    private static String extractString(String json, String key) {
+        try {
+            int idx = json.indexOf(key);
+            if (idx == -1) return null;
+            int start = idx + key.length();
+            int end = json.indexOf("\"", start);
+            if (end == -1) return null;
+            return json.substring(start, end);
+        } catch (Exception e) {
+            return null;
         }
-        return response.toString();
+    }
+
+    private static String escapeJson(String text) {
+        return text.replace("\"", "\\\"").replace("\n", "\\n");
     }
 }
+
