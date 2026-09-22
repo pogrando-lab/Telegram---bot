@@ -1,0 +1,183 @@
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.Random;
+
+public class Main {
+
+    private static final String BOT_TOKEN = "8937303127:AAGkHGUSMFMXYnU5foI9Y9yLv1T35zm2Icw";
+
+    public static void main(String[] args) {
+        System.out.println("=== Бот успешно запущен и ожидает нажатий ===");
+
+        long lastUpdateId = 0;
+
+        while (true) {
+            try {
+                String response = sendApiRequest("getUpdates", "offset=" + (lastUpdateId + 1) + "&timeout=20");
+
+                if (response != null && response.contains("\"ok\":true")) {
+                    lastUpdateId = processUpdates(response, lastUpdateId);
+                }
+                Thread.sleep(200);
+            } catch (Exception e) {
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException ignored) {}
+            }
+        }
+    }
+
+    private static long processUpdates(String json, long currentLast) {
+        long maxId = currentLast;
+        String[] updates = json.split("\\{\"update_id\":");
+
+        for (int i = 1; i < updates.length; i++) {
+            String u = updates[i];
+            try {
+                // Извлекаем update_id
+                int comma = u.indexOf(",");
+                if (comma != -1) {
+                    long id = Long.parseLong(u.substring(0, comma).trim());
+                    if (id > maxId) maxId = id;
+                }
+
+                // Обработка клика по кнопке
+                if (u.contains("\"callback_query\":")) {
+                    String cbId = getValue(u, "\"callback_query\":{\"id\":\"", "\"");
+                    if (cbId == null) cbId = getValue(u, "\"id\":\"", "\"");
+                    
+                    String data = getValue(u, "\"data\":\"", "\"");
+                    long chatId = getNumber(u, "\"chat\":{\"id\":");
+
+                    if (cbId != null) {
+                        sendApiRequest("answerCallbackQuery", "callback_query_id=" + URLEncoder.encode(cbId, StandardCharsets.UTF_8.name()));
+                    }
+
+                    if (chatId != 0 && data != null) {
+                        handleButtonClick(chatId, data);
+                    }
+                    continue;
+                }
+
+                // Обработка /start
+                if (u.contains("\"text\":\"")) {
+                    long chatId = getNumber(u, "\"chat\":{\"id\":");
+                    String text = getValue(u, "\"text\":\"", "\"");
+
+                    if (chatId != 0 && text != null && text.startsWith("/start")) {
+                        sendMenu(chatId);
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        return maxId;
+    }
+
+    private static void handleButtonClick(long chatId, String data) {
+        if ("BTN_STATUS".equals(data)) {
+            int num = 1000 + new Random().nextInt(9000);
+            sendMsg(chatId, "📦 <b>Статус заказа №" + num + ":</b>\nЗаказ собран и передан в доставку. Ожидайте завтра к 15:00.");
+        } else if ("BTN_PROMO".equals(data)) {
+            String[] codes = {"VIP50", "GIFT15", "BONUS2026", "SUMKA10"};
+            String code = codes[new Random().nextInt(codes.length)];
+            sendMsg(chatId, "🎁 <b>Ваш промокод:</b> <code>" + code + "</code>\nПримените его при оформлении!");
+        } else if ("BTN_FAQ".equals(data)) {
+            sendMsg(chatId, "❓ <b>Частые вопросы:</b>\n• Гарантия: 12 месяцев\n• Доставка: по всей стране\n• Возврат: 14 дней");
+        } else if ("BTN_SUPPORT".equals(data)) {
+            sendMsg(chatId, "💬 <b>Служба поддержки:</b>\nНапишите ваш вопрос прямо в чат, оператор скоро ответит!");
+        }
+    }
+
+    private static void sendMenu(long chatId) {
+        String text = "🤖 <b>Главное меню бренда</b>\n\nВыберите интересующий вас раздел:";
+        String markup = "{\"inline_keyboard\":[" +
+                "[{\"text\":\"📦 Статус заказа\",\"callback_data\":\"BTN_STATUS\"},{\"text\":\"🎁 Получить скидку\",\"callback_data\":\"BTN_PROMO\"}]," +
+                "[{\"text\":\"❓ Частые вопросы\",\"callback_data\":\"BTN_FAQ\"},{\"text\":\"💬 Поддержка\",\"callback_data\":\"BTN_SUPPORT\"}]" +
+                "]}";
+        sendMsgWithMarkup(chatId, text, markup);
+    }
+
+    private static void sendMsg(long chatId, String text) {
+        sendMsgWithMarkup(chatId, text, null);
+    }
+
+    private static void sendMsgWithMarkup(long chatId, String text, String markup) {
+        try {
+            StringBuilder p = new StringBuilder();
+            p.append("chat_id=").append(chatId);
+            p.append("&text=").append(URLEncoder.encode(text, StandardCharsets.UTF_8.name()));
+            p.append("&parse_mode=HTML");
+            if (markup != null) {
+                p.append("&reply_markup=").append(URLEncoder.encode(markup, StandardCharsets.UTF_8.name()));
+            }
+            sendApiRequest("sendMessage", p.toString());
+        } catch (Exception ignored) {}
+    }
+
+    private static String sendApiRequest(String method, String params) {
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL("https://api.telegram.org/bot" + BOT_TOKEN + "/" + method);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(20000);
+            conn.setDoOutput(true);
+
+            if (params != null && !params.isEmpty()) {
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(params.getBytes(StandardCharsets.UTF_8));
+                }
+            }
+
+            if (conn.getResponseCode() == 200) {
+                try (BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+                    StringBuilder sb = new StringBuilder();
+                    String l;
+                    while ((l = in.readLine()) != null) sb.append(l);
+                    return sb.toString();
+                }
+            }
+        } catch (Exception ignored) {}
+        finally {
+            if (conn != null) conn.disconnect();
+        }
+        return null;
+    }
+
+    private static String getValue(String json, String prefix, String suffix) {
+        try {
+            int start = json.indexOf(prefix);
+            if (start != -1) {
+                start += prefix.length();
+                int end = json.indexOf(suffix, start);
+                if (end != -1) return json.substring(start, end);
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private static long getNumber(String json, String prefix) {
+        try {
+            int start = json.indexOf(prefix);
+            if (start != -1) {
+                start += prefix.length();
+                StringBuilder sb = new StringBuilder();
+                while (start < json.length()) {
+                    char c = json.charAt(start);
+                    if (Character.isDigit(c) || c == '-') sb.append(c);
+                    else if (sb.length() > 0) break;
+                    start++;
+                }
+                if (sb.length() > 0) return Long.parseLong(sb.toString());
+            }
+        } catch (Exception ignored) {}
+        return 0;
+    }
+}
