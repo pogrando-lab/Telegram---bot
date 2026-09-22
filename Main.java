@@ -8,7 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Random;
 
 public class Main {
-    private static final String BOT_TOKEN = "8070966952:AAE320BpHv64S_L5Z80S5rR02hC3XG9M0YQ";
+    private static final String BOT_TOKEN = "8937303127:AAFRz6GgLeFLAYlJeJyIcwLPXAhz_NutLcM";
     private static final String TELEGRAM_API = "https://api.telegram.org/bot" + BOT_TOKEN;
 
     public static void main(String[] args) {
