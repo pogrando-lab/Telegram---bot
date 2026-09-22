@@ -30,9 +30,7 @@ public class Main {
 
                     String json = response.toString();
                     
-                    // Простая обработка обновлений
                     if (json.contains("\"update_id\":")) {
-                        // Извлекаем update_id
                         int updateIdIndex = json.lastIndexOf("\"update_id\":");
                         int commaIndex = json.indexOf(",", updateIdIndex);
                         if (commaIndex != -1) {
@@ -99,7 +97,6 @@ public class Main {
             conn.setRequestProperty("Content-Type", "application/json; utf-8");
             conn.setDoOutput(true);
 
-            // Формируем JSON с текстом и красивыми кнопками (Inline Keyboard)
             String jsonInputString = "{"
                     + "\"chat_id\": " + chatId + ","
                     + "\"text\": \"" + escapeJson(text) + "\","
@@ -159,4 +156,3 @@ public class Main {
         return text.replace("\"", "\\\"").replace("\n", "\\n");
     }
 }
-
